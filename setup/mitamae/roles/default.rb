@@ -1,0 +1,8 @@
+ENV['DEBIAN_FRONTEND'] = 'noninteractive'
+include_recipe '../cookbooks/common/default.rb'
+include_recipe '../cookbooks/percona-toolkit/default.rb'
+include_recipe '../cookbooks/alp/default.rb'
+#include_recipe '../cookbooks/wrk/default.rb'
+#include_recipe '../cookbooks/openresty/default.rb'
+include_recipe '../cookbooks/notify_slack/default.rb'
+include_recipe '../cookbooks/netdata/default.rb'
