@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/go-sql-driver/mysql"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/sessions"
@@ -36,7 +38,8 @@ const (
 )
 
 type handlers struct {
-	DB *sqlx.DB
+	DB    *sqlx.DB
+	Redis *redis.Client
 }
 
 var teacherNameCache = sync.Map{}
@@ -73,8 +76,15 @@ func main() {
 	db, _ := GetDB(false)
 	db.SetMaxOpenConns(40)
 
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     GetEnv("REDIS_ADDR", "127.0.0.1:6379"),
+		Password: "",
+		DB:       0,
+	})
+
 	h := &handlers{
-		DB: db,
+		DB:    db,
+		Redis: redisClient,
 	}
 
 	e.POST("/initialize", h.Initialize)
@@ -524,6 +534,10 @@ func (h *handlers) RegisterCourses(c echo.Context) error {
 	for _, course := range newlyAdded {
 		regArgs = append(regArgs, course.ID)
 		regArgs = append(regArgs, userID)
+		if err := h.Redis.SAdd(context.TODO(), "registrations:"+course.ID, userID).Err(); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
 	}
 
 	_, err = tx.Exec(
@@ -590,8 +604,8 @@ var cachedGPAs []float64
 var gpaCalcGroup singleflight.Group
 
 // map by course ID
-var totalScoreCachedAt  = sync.Map{} // map[string]time.Time
-var cachedTotalScore = sync.Map{} // map[string][]int
+var totalScoreCachedAt = sync.Map{}  // map[string]time.Time
+var cachedTotalScore = sync.Map{}    // map[string][]int
 var totalScoreCalcGroup = sync.Map{} // map[string]*singleflight.Group
 
 // GetGrades GET /api/users/me/grades 成績取得
@@ -788,7 +802,6 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		} else {
 			totals = score.([]int)
 		}
-
 
 		courseResults = append(courseResults, CourseResult{
 			Name:             course.Name,
@@ -1514,39 +1527,51 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	}
 
 	var unreadCount int
-	if err := h.DB.Get(&unreadCount, "SELECT COUNT(*) FROM `unread_announcements` WHERE `user_id` = ? AND NOT `is_deleted`", userID); err != nil {
+	//if err := h.DB.Get(&unreadCount, "SELECT COUNT(*) FROM `unread_announcements` WHERE `user_id` = ? AND NOT `is_deleted`", userID); err != nil {
+	//	c.Logger().Error(err)
+	//	return c.NoContent(http.StatusInternalServerError)
+	//}
+	if res, err := h.Redis.SCard(context.TODO(), "unread_announcements:"+userID).Result(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
+	} else {
+		unreadCount = int(res)
 	}
 
 	newAnnouncements := make([]AnnouncementWithoutDetail, 0, len(announcements))
 	if unreadCount > 0 && len(announcements) > 0 {
-		announcementIDs := make([]string, 0, len(announcements))
+		//announcementIDs := make([]string, 0, len(announcements))
+		//for _, announcement := range announcements {
+		//	announcementIDs = append(announcementIDs, announcement.ID)
+		//}
+		//query, args, err = sqlx.In("SELECT announcement_id FROM `unread_announcements` WHERE `user_id` = ? AND NOT `is_deleted` AND announcement_id IN (?)", userID, announcementIDs)
+		//if err != nil {
+		//	c.Logger().Error(err)
+		//	return c.NoContent(http.StatusInternalServerError)
+		//}
+		//var unreadAnnouncementIDs []string
+		//if err := h.DB.Select(&unreadAnnouncementIDs, query, args...); err != nil {
+		//	if err != sql.ErrNoRows {
+		//		c.Logger().Error(err)
+		//		return c.NoContent(http.StatusInternalServerError)
+		//	}
+		//}
+		//unreadMap := make(map[string]struct{}, len(unreadAnnouncementIDs))
+		//if len(unreadAnnouncementIDs) > 0 {
+		//	for _, unreadAnnouncementID := range unreadAnnouncementIDs {
+		//		unreadMap[unreadAnnouncementID] = struct{}{}
+		//	}
+		//}
 		for _, announcement := range announcements {
-			announcementIDs = append(announcementIDs, announcement.ID)
-		}
-		query, args, err = sqlx.In("SELECT announcement_id FROM `unread_announcements` WHERE `user_id` = ? AND NOT `is_deleted` AND announcement_id IN (?)", userID, announcementIDs)
-		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-		var unreadAnnouncementIDs []string
-		if err := h.DB.Select(&unreadAnnouncementIDs, query, args...); err != nil {
-			if err != sql.ErrNoRows {
+			//if _, ok := unreadMap[announcement.ID]; ok {
+			//	announcement.Unread = true
+			//}
+			var res bool
+			if res, err = h.Redis.SIsMember(context.TODO(), "unread_announcements:"+userID, announcement.ID).Result(); err != nil {
 				c.Logger().Error(err)
 				return c.NoContent(http.StatusInternalServerError)
 			}
-		}
-		unreadMap := make(map[string]struct{}, len(unreadAnnouncementIDs))
-		if len(unreadAnnouncementIDs) > 0 {
-			for _, unreadAnnouncementID := range unreadAnnouncementIDs {
-				unreadMap[unreadAnnouncementID] = struct{}{}
-			}
-		}
-		for _, announcement := range announcements {
-			if _, ok := unreadMap[announcement.ID]; ok {
-				announcement.Unread = true
-			}
+			announcement.Unread = res
 			newAnnouncements = append(newAnnouncements, announcement)
 		}
 		announcements = newAnnouncements
@@ -1642,13 +1667,25 @@ func (h *handlers) AddAnnouncement(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	query := "INSERT INTO `unread_announcements` (`announcement_id`, `user_id`)" +
-		" SELECT ?, `registrations`.`user_id` FROM `registrations`" +
-		" WHERE `registrations`.`course_id` = ?"
-	if _, err := tx.Exec(query, req.ID, req.CourseID); err != nil {
+	userIDs, err := h.Redis.SMembers(context.TODO(), "registrations:"+req.CourseID).Result()
+	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	for _, userID := range userIDs {
+		if err := h.Redis.SAdd(context.TODO(), "unread_announcements:"+userID, req.ID).Err(); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+	}
+
+	//query := "INSERT INTO `unread_announcements` (`announcement_id`, `user_id`)" +
+	//	" SELECT ?, `registrations`.`user_id` FROM `registrations`" +
+	//	" WHERE `registrations`.`course_id` = ?"
+	//if _, err := tx.Exec(query, req.ID, req.CourseID); err != nil {
+	//	c.Logger().Error(err)
+	//	return c.NoContent(http.StatusInternalServerError)
+	//}
 
 	if err := tx.Commit(); err != nil {
 		c.Logger().Error(err)
@@ -1680,12 +1717,20 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	announcementID := c.Param("announcementID")
 
 	var unread bool
-	var result sql.Result
-	if result, err = h.DB.Exec("UPDATE `unread_announcements` SET `is_deleted` = true WHERE `announcement_id` = ? AND `user_id` = ?", announcementID, userID); err != nil {
+	//var result sql.Result
+	//if result, err = h.DB.Exec("UPDATE `unread_announcements` SET `is_deleted` = true WHERE `announcement_id` = ? AND `user_id` = ?", announcementID, userID); err != nil {
+	//	c.Logger().Error(err)
+	//	return c.NoContent(http.StatusInternalServerError)
+	//}
+	//if cnt, _ := result.RowsAffected(); cnt == 1 {
+	//	unread = true
+	//}
+	var unreadCount int64
+	if unreadCount, err = h.Redis.SRem(context.TODO(), "unread_announcements:"+userID, announcementID).Result(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	if cnt, _ := result.RowsAffected(); cnt == 1 {
+	if unreadCount == 1 {
 		unread = true
 	}
 
