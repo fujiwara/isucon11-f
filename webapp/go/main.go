@@ -585,9 +585,9 @@ var cachedGPAs []float64
 var gpaCalcGroup singleflight.Group
 
 // map by course ID
-var totalScoreCachedAt map[string]time.Time = map[string]time.Time{}
-var cachedTotalScore map[string][]int = map[string][]int{}
-var totalScoreCalcGroup map[string]*singleflight.Group = map[string]*singleflight.Group{}
+var totalScoreCachedAt  = sync.Map{} // map[string]time.Time
+var cachedTotalScore = sync.Map{} // map[string][]int
+var totalScoreCalcGroup = sync.Map{} // map[string]*singleflight.Group
 
 // GetGrades GET /api/users/me/grades 成績取得
 func (h *handlers) GetGrades(c echo.Context) error {
@@ -699,13 +699,17 @@ func (h *handlers) GetGrades(c echo.Context) error {
 
 		// この科目を履修している学生のTotalScore一覧を取得
 		var totals []int
-		if now.Sub(totalScoreCachedAt[course.ID]) > 100*time.Millisecond || cachedTotalScore[course.ID] == nil {
+		cachedAt, found := totalScoreCachedAt.Load(course.ID)
+		score, found2 := cachedTotalScore.Load(course.ID)
+		if !found || !found2 || now.Sub(cachedAt.(time.Time)) > 100*time.Millisecond {
+			flightIf, found3 := totalScoreCalcGroup.Load(course.ID)
 			var flight *singleflight.Group
-			var exists bool
-			if flight, exists = totalScoreCalcGroup[course.ID]; !exists {
+			if !found3 {
 				flight = &singleflight.Group{}
-				totalScoreCalcGroup[course.ID] = flight
+			} else {
+				flight = flightIf.(*singleflight.Group)
 			}
+			totalScoreCalcGroup.Store(course.ID, flight)
 			totalsIf, err, _ := flight.Do(fmt.Sprintf("totalScore-%s", course.ID), func() (interface{}, error) {
 				var newTotals []int
 				q := "SELECT IFNULL(SUM(`submissions`.`score`), 0) AS `total_score`" +
@@ -728,10 +732,10 @@ func (h *handlers) GetGrades(c echo.Context) error {
 			}
 
 			totals = totalsIf.([]int)
-			cachedTotalScore[course.ID] = totals
-			totalScoreCachedAt[course.ID] = now
+			cachedTotalScore.Store(course.ID, totals)
+			totalScoreCachedAt.Store(course.ID, now)
 		} else {
-			totals = cachedTotalScore[course.ID]
+			totals = score.([]int)
 		}
 
 
