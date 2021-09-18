@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
+	echopprof "github.com/hiko1129/echo-pprof"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/v4"
@@ -83,6 +84,7 @@ func main() {
 			announcementsAPI.GET("/:announcementID", h.GetAnnouncementDetail)
 		}
 	}
+	echopprof.Wrap(e)
 
 	e.Logger.Error(e.StartServer(e.Server))
 }
