@@ -701,7 +701,8 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		var totals []int
 		if now.Sub(totalScoreCachedAt[course.ID]) > 900*time.Millisecond || cachedTotalScore[course.ID] == nil {
 			var flight *singleflight.Group
-			if flight, exists := totalScoreCalcGroup[course.ID]; !exists {
+			var exists bool
+			if flight, exists = totalScoreCalcGroup[course.ID]; !exists {
 				flight = &singleflight.Group{}
 				totalScoreCalcGroup[course.ID] = flight
 			}
