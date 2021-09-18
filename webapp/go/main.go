@@ -1432,7 +1432,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	}
 
 	newAnnouncements := make([]AnnouncementWithoutDetail, 0, len(announcements))
-	if unreadCount > 0 {
+	if unreadCount > 0 && len(announcements) > 0 {
 		announcementIDs := make([]string, 0, len(announcements))
 		for _, announcement := range announcements {
 			announcementIDs = append(announcementIDs, announcement.ID)
