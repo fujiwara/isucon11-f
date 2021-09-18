@@ -10,17 +10,19 @@ DROP TABLE IF EXISTS `users`;
 -- master data
 CREATE TABLE `users`
 (
-    `id`              CHAR(26) PRIMARY KEY CHARACTER SET latin1,
-    `code`            CHAR(6) UNIQUE CHARACTER SET latin1  NOT NULL,
+    `id`              CHAR(26) CHARACTER SET latin1,
+    `code`            CHAR(6) CHARACTER SET latin1  NOT NULL,
     `name`            VARCHAR(255)                NOT NULL,
     `hashed_password` BINARY(60)                  NOT NULL,
-    `type`            ENUM ('student', 'teacher') NOT NULL
+    `type`            ENUM ('student', 'teacher') NOT NULL,
+    PRIMARY KEY(`id`),
+    UNIQUE (`code`)
 );
 
 CREATE TABLE `courses`
 (
-    `id`          CHAR(26) PRIMARY KEY CHARACTER SET latin1,
-    `code`        VARCHAR(255) UNIQUE CHARACTER SET latin1                      NOT NULL,
+    `id`          CHAR(26) CHARACTER SET latin1,
+    `code`        VARCHAR(255) CHARACTER SET latin1                      NOT NULL,
     `type`        ENUM ('liberal-arts', 'major-subjects')                       NOT NULL,
     `name`        VARCHAR(255)                                                  NOT NULL,
     `description` TEXT                                                          NOT NULL,
@@ -30,7 +32,9 @@ CREATE TABLE `courses`
     `teacher_id`  CHAR(26) CHARACTER SET latin1                                 NOT NULL,
     `keywords`    TEXT                                                          NOT NULL,
     `status`      ENUM ('registration', 'in-progress', 'closed')                NOT NULL DEFAULT 'registration',
-    CONSTRAINT FK_courses_teacher_id FOREIGN KEY (`teacher_id`) REFERENCES `users` (`id`)
+    CONSTRAINT FK_courses_teacher_id FOREIGN KEY (`teacher_id`) REFERENCES `users` (`id`),
+    PRIMARY KEY(`id`),
+    UNIQUE (`code`)
 );
 
 CREATE TABLE `registrations`
@@ -39,19 +43,20 @@ CREATE TABLE `registrations`
     `user_id`   CHAR(26) CHARACTER SET latin1,
     PRIMARY KEY (`course_id`, `user_id`),
     CONSTRAINT FK_registrations_course_id FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`),
-    CONSTRAINT FK_registrations_user_id FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+    CONSTRAINT FK_registrations_user_id FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
 );
 
 CREATE TABLE `classes`
 (
-    `id`                CHAR(26) PRIMARY KEY CHARACTER SET latin1,
+    `id`                CHAR(26) CHARACTER SET latin1,
     `course_id`         CHAR(26) CHARACTER SET latin1 NOT NULL,
     `part`              TINYINT UNSIGNED NOT NULL,
     `title`             VARCHAR(255)     NOT NULL,
     `description`       TEXT             NOT NULL,
     `submission_closed` TINYINT(1)       NOT NULL DEFAULT false,
     UNIQUE KEY `idx_classes_course_id_part` (`course_id`, `part`),
-    CONSTRAINT FK_classes_course_id FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`)
+    CONSTRAINT FK_classes_course_id FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`),
+    PRIMARY KEY(`id`)
 );
 
 CREATE TABLE `submissions`
@@ -67,11 +72,12 @@ CREATE TABLE `submissions`
 
 CREATE TABLE `announcements`
 (
-    `id`         CHAR(26) PRIMARY KEY CHARACTER SET latin1,
+    `id`         CHAR(26) CHARACTER SET latin1,
     `course_id`  CHAR(26) CHARACTER SET latin1 NOT NULL,
     `title`      VARCHAR(255) NOT NULL,
     `message`    TEXT         NOT NULL,
-    CONSTRAINT FK_announcements_course_id FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`)
+    CONSTRAINT FK_announcements_course_id FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`),
+    PRIMARY KEY(`id`)
 );
 
 CREATE TABLE `unread_announcements`
