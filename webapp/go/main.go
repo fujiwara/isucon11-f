@@ -1526,8 +1526,8 @@ func (h *handlers) AddAnnouncement(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	var courceName int
-	if err := tx.Get(&courceName, "SELECT name FROM `courses` WHERE `id` = ?", req.CourseID); err != nil {
+	var courseName string
+	if err := tx.Get(&courseName, "SELECT name FROM `courses` WHERE `id` = ?", req.CourseID); err != nil {
 		if err == sql.ErrNoRows {
 			return c.String(http.StatusNotFound, "No such course.")
 		}
@@ -1536,7 +1536,7 @@ func (h *handlers) AddAnnouncement(c echo.Context) error {
 	}
 
 	if _, err := tx.Exec("INSERT INTO `announcements` (`id`, `course_id`, `course_name`, `title`, `message`) VALUES (?, ?, ?, ?, ?)",
-		req.ID, req.CourseID, courceName, req.Title, req.Message); err != nil {
+		req.ID, req.CourseID, courseName, req.Title, req.Message); err != nil {
 		_ = tx.Rollback()
 		if mysqlErr, ok := err.(*mysql.MySQLError); ok && mysqlErr.Number == uint16(mysqlErrNumDuplicateEntry) {
 			var announcement Announcement
