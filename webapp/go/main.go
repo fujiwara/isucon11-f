@@ -534,7 +534,7 @@ func (h *handlers) RegisterCourses(c echo.Context) error {
 	for _, course := range newlyAdded {
 		regArgs = append(regArgs, course.ID)
 		regArgs = append(regArgs, userID)
-		if err := h.Redis.SAdd(context.TODO(), "registrations:"+course.ID, userID); err != nil {
+		if err := h.Redis.SAdd(context.TODO(), "registrations:"+course.ID, userID).Err(); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
