@@ -585,8 +585,8 @@ var cachedGPAs []float64
 var gpaCalcGroup singleflight.Group
 
 // map by course ID
-var totalScoreCachedAt = sync.Map{}  // map[string]time.Time
-var cachedTotalScore = sync.Map{}    // map[string][]int
+var totalScoreCachedAt  = sync.Map{} // map[string]time.Time
+var cachedTotalScore = sync.Map{} // map[string][]int
 var totalScoreCalcGroup = sync.Map{} // map[string]*singleflight.Group
 
 // GetGrades GET /api/users/me/grades 成績取得
@@ -737,6 +737,7 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		} else {
 			totals = score.([]int)
 		}
+
 
 		courseResults = append(courseResults, CourseResult{
 			Name:             course.Name,
@@ -1414,7 +1415,6 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 
 	var announcements []AnnouncementWithoutDetail
 	var args []interface{}
-	var courseIDs []string
 	query := "SELECT `announcements`.`id`, `announcements`.`course_id` AS `course_id`, `announcements`.`course_name`, `announcements`.`title`, false AS `unread`" +
 		" FROM `announcements`" +
 		" WHERE 1=1"
@@ -1423,6 +1423,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		query += " AND `announcements`.`course_id` = ?"
 		args = append(args, courseID)
 	} else {
+		var courseIDs []string
 		if err := h.DB.Select(&courseIDs, "SELECT course_id FROM `registrations` WHERE `user_id` = ?", userID); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
@@ -1460,25 +1461,11 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	var totalAnnoucementsCount int
-	if len(courseIDs) > 0 {
-		query, args, err = sqlx.In("SELECT COUNT(*) FROM `announcements` WHERE `course_id` IN (?)", courseIDs)
-		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-		if err := h.DB.Get(&totalAnnoucementsCount, query, args...); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-	}
-
-	var readCount int
-	if err := h.DB.Get(&readCount, "SELECT COUNT(*) FROM `unread_announcements` WHERE `user_id` = ? AND `is_deleted`", userID); err != nil {
+	var unreadCount int
+	if err := h.DB.Get(&unreadCount, "SELECT COUNT(*) FROM `unread_announcements` WHERE `user_id` = ? AND NOT `is_deleted`", userID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	unreadCount := totalAnnoucementsCount - readCount
 
 	newAnnouncements := make([]AnnouncementWithoutDetail, 0, len(announcements))
 	if unreadCount > 0 && len(announcements) > 0 {
