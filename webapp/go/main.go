@@ -1436,7 +1436,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		for _, announcement := range announcements {
 			announcementIDs = append(announcementIDs, announcement.ID)
 		}
-		query, args, err = sqlx.In("SELECT announcement_id FROM `unread_announcements` WHERE `user_id` = ? AND `is_deleted` = true AND announcement_id IN (?)", userID, announcementIDs)
+		query, args, err = sqlx.In("SELECT announcement_id FROM `unread_announcements` WHERE `user_id` = ? AND `is_deleted` = false AND announcement_id IN (?)", userID, announcementIDs)
 		if err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
