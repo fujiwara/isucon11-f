@@ -1610,7 +1610,7 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 		} else if err == sql.ErrNoRows {
 			return c.String(http.StatusNotFound, "No such announcement.")
 		}
-		announcement = _ann
+		annoucementsMap[announcementID] = announcement
 	}
 
 	var result sql.Result
