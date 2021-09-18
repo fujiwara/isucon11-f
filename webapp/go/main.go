@@ -597,9 +597,9 @@ var cachedGPAs []float64
 var gpaCalcGroup singleflight.Group
 
 // map by course ID
-var totalScoreCachedAt map[string]time.Time
-var cachedTotalScore map[string][]int
-var totalScoreCalcGroup map[string]singleflight.Group 
+var totalScoreCachedAt map[string]time.Time = map[string]time.Time{}
+var cachedTotalScore map[string][]int = map[string][]int{}
+var totalScoreCalcGroup map[string]singleflight.Group = map[string]singleflight.Group{}
 
 // GetGrades GET /api/users/me/grades 成績取得
 func (h *handlers) GetGrades(c echo.Context) error {
