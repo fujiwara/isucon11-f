@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -38,7 +39,7 @@ type handlers struct {
 	DB *sqlx.DB
 }
 
-var teacherNameCache = make(map[string]string, 1000)
+var teacherNameCache = sync.Map{}
 
 type JSONSerializer struct{}
 
@@ -417,15 +418,15 @@ func (h *handlers) GetRegisteredCourses(c echo.Context) error {
 	for _, course := range courses {
 		var teacher User
 		var teacherName string
-		if name, found := teacherNameCache[course.TeacherID]; found {
-			teacherName = name
+		if name, found := teacherNameCache.Load(course.TeacherID); found {
+			teacherName = name.(string)
 		} else {
 			if err := h.DB.Get(&teacher, "SELECT name FROM `users` WHERE `id` = ?", course.TeacherID); err != nil {
 				c.Logger().Error(err)
 				return c.NoContent(http.StatusInternalServerError)
 			}
 			teacherName = teacher.Name
-			teacherNameCache[course.TeacherID] = teacherName
+			teacherNameCache.Store(course.TeacherID, teacherName)
 		}
 
 		res = append(res, GetRegisteredCourseResponseContent{
