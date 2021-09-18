@@ -590,8 +590,8 @@ var cachedGPAs []float64
 var gpaCalcGroup singleflight.Group
 
 // map by course ID
-var totalScoreCachedAt = sync.Map{}  // map[string]time.Time
-var cachedTotalScore = sync.Map{}    // map[string][]int
+var totalScoreCachedAt  = sync.Map{} // map[string]time.Time
+var cachedTotalScore = sync.Map{} // map[string][]int
 var totalScoreCalcGroup = sync.Map{} // map[string]*singleflight.Group
 
 // GetGrades GET /api/users/me/grades 成績取得
@@ -742,6 +742,7 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		} else {
 			totals = score.([]int)
 		}
+
 
 		courseResults = append(courseResults, CourseResult{
 			Name:             course.Name,
@@ -1428,15 +1429,15 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		query += " AND `announcements`.`course_id` = ?"
 		args = append(args, courseID)
 	} else {
-		var announcementIDs []string
-		if err := h.DB.Select(&announcementIDs, "SELECT DISTINCT(announcement_id) FROM `unread_announcements` WHERE `user_id` = ?", userID); err != nil {
+		var courseIDs []string
+		if err := h.DB.Select(&courseIDs, "SELECT course_id FROM `registrations` WHERE `user_id` = ?", userID); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
-		if len(announcementIDs) == 0 {
+		if len(courseIDs) == 0 {
 			query += " AND 1=0"
 		} else {
-			wq, wqargs, err := sqlx.In(" AND `announcements`.`id` IN (?)", announcementIDs)
+			wq, wqargs, err := sqlx.In(" AND `announcements`.`course_id` IN (?)", courseIDs)
 			if err != nil {
 				c.Logger().Error(err)
 				return c.NoContent(http.StatusInternalServerError)
