@@ -1436,7 +1436,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		for _, announcement := range announcements {
 			announcementIDs = append(announcementIDs, announcement.ID)
 		}
-		query, args, err = sqlx.In("SELECT announcement_id FROM `unread_announcements` WHERE `user_id` = ? AND `is_deleted` = false AND announcement_id IN (?)", userID, announcementIDs)
+		query, args, err = sqlx.In("SELECT announcement_id FROM `unread_announcements` WHERE `user_id` = ? AND NOT `is_deleted` AND announcement_id IN (?)", userID, announcementIDs)
 		if err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
@@ -1612,7 +1612,7 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	}
 
 	var result sql.Result
-	if result, err = tx.Exec("UPDATE `unread_announcements` SET `is_deleted` = true WHERE `announcement_id` = ? AND `user_id` = ? AND `is_deleted` = false", announcementID, userID); err != nil {
+	if result, err = tx.Exec("UPDATE `unread_announcements` SET `is_deleted` = true WHERE `announcement_id` = ? AND `user_id` = ? AND NOT `is_deleted`", announcementID, userID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
