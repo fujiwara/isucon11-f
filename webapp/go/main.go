@@ -493,13 +493,19 @@ func (h *handlers) RegisterCourses(c echo.Context) error {
 	if len(errors.CourseNotFound) > 0 || len(errors.NotRegistrableStatus) > 0 || len(errors.ScheduleConflict) > 0 {
 		return c.JSON(http.StatusBadRequest, errors)
 	}
-
+	regArgs := make([]interface{}, 0, len(newlyAdded)*2)
 	for _, course := range newlyAdded {
-		_, err = tx.Exec("INSERT INTO `registrations` (`course_id`, `user_id`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `course_id` = VALUES(`course_id`), `user_id` = VALUES(`user_id`)", course.ID, userID)
-		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
+		regArgs = append(regArgs, course.ID)
+		regArgs = append(regArgs, userID)
+	}
+
+	_, err = tx.Exec(
+		"INSERT IGNORE INTO `registrations` (`course_id`, `user_id`) "+
+			"VALUES (?, ?)"+strings.Repeat(",(?,?)", len(newlyAdded)-1), regArgs...,
+	)
+	if err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	if err = tx.Commit(); err != nil {
