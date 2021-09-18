@@ -1409,12 +1409,6 @@ func (h *handlers) DownloadSubmittedAssignments(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	zipFilePath := AssignmentsDirectory + classID + ".zip"
-	if err := createSubmissionsZip2(zipFilePath, classID, submissions); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-
 	if _, err := tx.Exec("UPDATE `classes` SET `submission_closed` = true WHERE `id` = ?", classID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1425,7 +1419,14 @@ func (h *handlers) DownloadSubmittedAssignments(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	return c.File(zipFilePath)
+	zipFilePath := AssignmentsDirectory + classID + ".zip"
+	if err := createSubmissionsZip2(zipFilePath, classID, submissions); err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	c.Response().Header().Set("x-accel-redirect", "/assignments/"+classID+".zip")
+	return c.NoContent(http.StatusOK)
 }
 
 func createSubmissionsZip2(zipFilePath string, classID string, submissions []Submission) error {
