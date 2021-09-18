@@ -1220,7 +1220,7 @@ func (h *handlers) RegisterScores(c echo.Context) error {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	if err := tx.Get(&userIDAndCode, ucq, args...); err != nil {
+	if err := tx.Select(&userIDAndCode, ucq, args...); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
