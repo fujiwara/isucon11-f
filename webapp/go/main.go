@@ -1406,8 +1406,6 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	}
 
 	query += " ORDER BY `announcements`.`id` DESC LIMIT ? OFFSET ?"
-	args = append(args, userID, userID)
-
 	var page int
 	if c.QueryParam("page") == "" {
 		page = 1
