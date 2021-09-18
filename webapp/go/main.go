@@ -1502,8 +1502,8 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 			}
 			newAnnouncements = append(newAnnouncements, announcement)
 		}
+		announcements = newAnnouncements
 	}
-	announcements = newAnnouncements
 
 	var links []string
 	linkURL, err := url.Parse(c.Request().URL.Path + "?" + c.Request().URL.RawQuery)
