@@ -1396,13 +1396,17 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
-		wq, wqargs, err := sqlx.In(" AND `announcements`.`course_id` IN (?)", courseIDs)
-		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
+		if len(courseIDs) == 0 {
+			query += " AND 1=0"
+		} else {
+			wq, wqargs, err := sqlx.In(" AND `announcements`.`course_id` IN (?)", courseIDs)
+			if err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+			query += wq
+			args = append(args, wqargs...)
 		}
-		query += wq
-		args = append(args, wqargs...)
 	}
 
 	query += " ORDER BY `announcements`.`id` DESC LIMIT ? OFFSET ?"
