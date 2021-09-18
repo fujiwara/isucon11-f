@@ -493,7 +493,7 @@ func (h *handlers) RegisterCourses(c echo.Context) error {
 	if len(errors.CourseNotFound) > 0 || len(errors.NotRegistrableStatus) > 0 || len(errors.ScheduleConflict) > 0 {
 		return c.JSON(http.StatusBadRequest, errors)
 	}
-	regArgs := make([]interface{}, len(newlyAdded)*2)
+	regArgs := make([]interface{}, 0, len(newlyAdded)*2)
 	for _, course := range newlyAdded {
 		regArgs = append(regArgs, course.ID)
 		regArgs = append(regArgs, userID)
