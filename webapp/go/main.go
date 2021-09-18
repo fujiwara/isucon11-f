@@ -664,35 +664,79 @@ func (h *handlers) GetGrades(c echo.Context) error {
 
 		// 講義毎の成績計算処理
 		classScores := make([]ClassScore, 0, len(classes))
-		var myTotalScore int
+		classIDs := []string{}
 		for _, class := range classes {
-			var submissionsCount int
-			if err := h.DB.Get(&submissionsCount, "SELECT COUNT(*) FROM `submissions` WHERE `class_id` = ?", class.ID); err != nil {
-				c.Logger().Error(err)
-				return c.NoContent(http.StatusInternalServerError)
-			}
+			classIDs = append(classIDs, class.ID)
+		}
 
-			var myScore sql.NullInt64
-			if err := h.DB.Get(&myScore, "SELECT `submissions`.`score` FROM `submissions` WHERE `user_id` = ? AND `class_id` = ?", userID, class.ID); err != nil && err != sql.ErrNoRows {
+		var myTotalScore int
+		q, args, err := sqlx.In("SELECT class_id, COUNT(*) FROM `submissions` WHERE `class_id` IN (?) GROUP BY `class_id`", classIDs)
+		if err != nil {
+			c.Logger().Error(err) // oops
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		rows, err := h.DB.Query(q, args...)
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+
+		submissionsCounts := map[string]int64{}
+		for rows.Next() {
+			var classID string
+			var count int64
+			err := rows.Scan(&classID, &count)
+			if err != nil {
 				c.Logger().Error(err)
-				return c.NoContent(http.StatusInternalServerError)
-			} else if err == sql.ErrNoRows || !myScore.Valid {
+			}
+			submissionsCounts[classID] = count
+		}
+		rows.Close()
+
+		q, args, err = sqlx.In("SELECT `class_id`, `submissions`.`score` FROM `submissions` WHERE `user_id` = ? AND `class_id` IN (?)", userID, classIDs)
+		if err != nil {
+			c.Logger().Error(err) // oops
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		rows, err = h.DB.Query(q, args...)
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+
+		myScores := map[string]sql.NullInt64{}
+		for rows.Next() {
+			var classID string
+			var score sql.NullInt64
+			err := rows.Scan(&classID, &score)
+			if err != nil {
+				c.Logger().Error(err)
+			}
+			myScores[classID] = score
+		}
+		rows.Close()
+
+		for _, class := range classes {
+			classID := class.ID
+			subCount := int(submissionsCounts[classID])
+			nullScore := myScores[classID]
+			if !nullScore.Valid {
 				classScores = append(classScores, ClassScore{
-					ClassID:    class.ID,
+					ClassID:    classID,
 					Part:       class.Part,
 					Title:      class.Title,
 					Score:      nil,
-					Submitters: submissionsCount,
+					Submitters: subCount,
 				})
 			} else {
-				score := int(myScore.Int64)
+				score := int(nullScore.Int64)
 				myTotalScore += score
 				classScores = append(classScores, ClassScore{
-					ClassID:    class.ID,
+					ClassID:    classID,
 					Part:       class.Part,
 					Title:      class.Title,
 					Score:      &score,
-					Submitters: submissionsCount,
+					Submitters: subCount,
 				})
 			}
 		}
