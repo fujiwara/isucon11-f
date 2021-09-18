@@ -1428,10 +1428,9 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 
 	var announcements []AnnouncementWithoutDetail
 	var args []interface{}
-	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, NOT `unread_announcements`.`is_deleted` AS `unread`" +
+	query := "SELECT `announcements`.`id`, `announcements`.`course_id` AS `course_id`, `announcements`.`course_name`, `announcements`.`title`, NOT `unread_announcements`.`is_deleted` AS `unread`" +
 		" FROM `announcements`" +
-		" JOIN `courses` ON `announcements`.`course_id` = `courses`.`id`" +
-		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id`" +
+		" JOIN `registrations` ON `announcements`.`course_id` = `registrations`.`course_id`" +
 		" JOIN `unread_announcements` ON `announcements`.`id` = `unread_announcements`.`announcement_id`" +
 		" WHERE 1=1"
 
@@ -1614,7 +1613,7 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	if _ann, ok := annoucementsMap[announcementID]; ok {
 		announcement = _ann
 	} else {
-		query := "SELECT `announcements`.`id`, `announcements`.`cource_id` AS `course_id`, '' AS `course_name`, `announcements`.`title`, `announcements`.`message`, true AS `unread`" +
+		query := "SELECT `announcements`.`id`, `announcements`.`cource_id` AS `course_id`, `announcements`.`course_name`, `announcements`.`title`, `announcements`.`message`, true AS `unread`" +
 			" FROM `announcements`" +
 			" WHERE `announcements`.`id` = ?"
 		if err := tx.Get(&announcement, query, announcementID, userID); err != nil && err != sql.ErrNoRows {
@@ -1623,12 +1622,6 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 		} else if err == sql.ErrNoRows {
 			return c.String(http.StatusNotFound, "No such announcement.")
 		}
-		var courceName string
-		if err := tx.Get(&courceName, "SELECT name FROM `cources` WHERE id = ?", announcementID); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-		announcement.CourseName = courceName
 		announcement = _ann
 	}
 
