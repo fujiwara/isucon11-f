@@ -1391,12 +1391,12 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		query += " AND `announcements`.`course_id` = ?"
 		args = append(args, courseID)
 	} else {
-		var regIDs []string
-		if err := h.DB.Select(&regIDs, "SELECT id FROM `registrations` WHERE `user_id` = ?", userID); err != nil {
+		var courseIDs []string
+		if err := h.DB.Select(&courseIDs, "SELECT course_id FROM `registrations` WHERE `user_id` = ?", userID); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
-		wq, wqargs, err := sqlx.In(" AND `announcements`.`course_id` IN (?)", regIDs)
+		wq, wqargs, err := sqlx.In(" AND `announcements`.`course_id` IN (?)", courseIDs)
 		if err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
