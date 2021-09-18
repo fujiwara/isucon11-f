@@ -40,7 +40,7 @@ type handlers struct {
 }
 
 var teacherNameCache = sync.Map{}
-var courseStatusCache = sync.Map{}
+var courseCache = sync.Map{}
 
 type JSONSerializer struct{}
 
@@ -467,21 +467,19 @@ func (h *handlers) RegisterCourses(c echo.Context) error {
 	for _, courseReq := range req {
 		courseID := courseReq.ID
 		var course Course
-		var courseStatus CourseStatus
-		if s, found := courseStatusCache.Load(courseID); found {
-			courseStatus = s.(CourseStatus)
+		if cs, found := courseCache.Load(courseID); found {
+			course = cs.(Course)
 		} else {
-			if err := tx.Get(&course, "SELECT status FROM `courses` WHERE `id` = ? FOR SHARE", courseID); err != nil && err != sql.ErrNoRows {
+			if err := tx.Get(&course, "SELECT * FROM `courses` WHERE `id` = ? FOR SHARE", courseID); err != nil && err != sql.ErrNoRows {
 				c.Logger().Error(err)
 				return c.NoContent(http.StatusInternalServerError)
 			} else if err == sql.ErrNoRows {
 				errors.CourseNotFound = append(errors.CourseNotFound, courseReq.ID)
 				continue
 			}
-			courseStatus = course.Status
-			courseStatusCache.Store(courseID, courseStatus)
+			courseCache.Store(courseID, course)
 		}
-		if courseStatus != StatusRegistration {
+		if course.Status != StatusRegistration {
 			errors.NotRegistrableStatus = append(errors.NotRegistrableStatus, course.ID)
 			continue
 		}
@@ -1004,12 +1002,11 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	var count int
-	if err := tx.Get(&count, "SELECT COUNT(*) FROM `courses` WHERE `id` = ? FOR UPDATE", courseID); err != nil {
+	var course Course
+	if err := tx.Get(&course, "SELECT * FROM `courses` WHERE `id` = ? FOR UPDATE", courseID); err != nil && err != sql.ErrNoRows {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
-	}
-	if count == 0 {
+	} else if err == sql.ErrNoRows {
 		return c.String(http.StatusNotFound, "No such course.")
 	}
 
@@ -1017,7 +1014,8 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	courseStatusCache.Store(courseID, req.Status)
+	course.Status = req.Status
+	courseCache.Store(courseID, course)
 
 	if err := tx.Commit(); err != nil {
 		c.Logger().Error(err)
