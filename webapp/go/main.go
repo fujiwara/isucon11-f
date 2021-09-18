@@ -1431,6 +1431,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
+	newAnnouncements := make([]AnnouncementWithoutDetail, 0, len(announcements))
 	if unreadCount > 0 {
 		announcementIDs := make([]string, 0, len(announcements))
 		for _, announcement := range announcements {
@@ -1458,8 +1459,10 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 			if _, ok := unreadMap[announcement.ID]; ok {
 				announcement.Unread = true
 			}
+			newAnnouncements = append(newAnnouncements, announcement)
 		}
 	}
+	announcements = newAnnouncements
 
 	var links []string
 	linkURL, err := url.Parse(c.Request().URL.Path + "?" + c.Request().URL.RawQuery)
