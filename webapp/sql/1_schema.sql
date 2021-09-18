@@ -72,10 +72,11 @@ CREATE TABLE `submissions`
 
 CREATE TABLE `announcements`
 (
-    `id`         CHAR(26) CHARACTER SET latin1,
-    `course_id`  CHAR(26) CHARACTER SET latin1 NOT NULL,
-    `title`      VARCHAR(255) NOT NULL,
-    `message`    TEXT         NOT NULL,
+    `id`          CHAR(26) CHARACTER SET latin1,
+    `course_id`   CHAR(26) CHARACTER SET latin1 NOT NULL,
+    `course_name` VARCHAR(255) NOT NULL,
+    `title`       VARCHAR(255) NOT NULL,
+    `message`     TEXT         NOT NULL,
     CONSTRAINT FK_announcements_course_id FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`),
     PRIMARY KEY(`id`)
 );
