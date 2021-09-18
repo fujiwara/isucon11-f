@@ -1604,7 +1604,7 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 		query := "SELECT `announcements`.`id`, `announcements`.`course_id` AS `course_id`, `announcements`.`course_name`, `announcements`.`title`, `announcements`.`message`, true AS `unread`" +
 			" FROM `announcements`" +
 			" WHERE `announcements`.`id` = ?"
-		if err := tx.Get(&announcement, query, announcementID, userID); err != nil && err != sql.ErrNoRows {
+		if err := tx.Get(&announcement, query, announcementID); err != nil && err != sql.ErrNoRows {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		} else if err == sql.ErrNoRows {
