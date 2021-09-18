@@ -62,6 +62,14 @@ func (j *JSONSerializer) Deserialize(c echo.Context, i interface{}) error {
 	return err
 }
 
+func newRedis() *redis.Client {
+	return redis.NewClient(&redis.Options{
+		Addr:     GetEnv("REDIS_ADDR", "127.0.0.1:6379"),
+		Password: "",
+		DB:       0,
+	})
+}
+
 func main() {
 	e := echo.New()
 	e.JSONSerializer = &JSONSerializer{}
@@ -156,6 +164,12 @@ func (h *handlers) Initialize(c echo.Context) error {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+
+	rc := newRedis()
+	rc.FlushAll(context.TODO())
+	rc.SAdd(context.TODO(), "unread_announcements:01FF4RXEKS0DG2EG20CN2GJB8K", "01FF4RXEKS0DG2EG20DDPCS14P")
+	rc.SAdd(context.TODO(), "registrations:01FF4RXEKS0DG2EG20CWPQ60M3", "01FF4RXEKS0DG2EG20CN2GJB8K", "01FF4RXEKS0DG2EG20CQVX6FV0", "01FF4RXEKS0DG2EG20CTTAPEVH")
+	rc.SAdd(context.TODO(), "registrations:01FF4RXEKS0DG2EG20CYAYCCGM", "01FF4RXEKS0DG2EG20CN2GJB8K")
 
 	res := InitializeResponse{
 		Language: "go",
