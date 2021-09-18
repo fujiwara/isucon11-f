@@ -590,8 +590,8 @@ var cachedGPAs []float64
 var gpaCalcGroup singleflight.Group
 
 // map by course ID
-var totalScoreCachedAt  = sync.Map{} // map[string]time.Time
-var cachedTotalScore = sync.Map{} // map[string][]int
+var totalScoreCachedAt = sync.Map{}  // map[string]time.Time
+var cachedTotalScore = sync.Map{}    // map[string][]int
 var totalScoreCalcGroup = sync.Map{} // map[string]*singleflight.Group
 
 // GetGrades GET /api/users/me/grades 成績取得
@@ -788,7 +788,6 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		} else {
 			totals = score.([]int)
 		}
-
 
 		courseResults = append(courseResults, CourseResult{
 			Name:             course.Name,
@@ -1396,12 +1395,6 @@ func (h *handlers) DownloadSubmittedAssignments(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	zipFilePath := AssignmentsDirectory + classID + ".zip"
-	if err := createSubmissionsZip2(zipFilePath, classID, submissions); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-
 	if _, err := tx.Exec("UPDATE `classes` SET `submission_closed` = true WHERE `id` = ?", classID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1412,7 +1405,14 @@ func (h *handlers) DownloadSubmittedAssignments(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	return c.File(zipFilePath)
+	zipFilePath := AssignmentsDirectory + classID + ".zip"
+	if err := createSubmissionsZip2(zipFilePath, classID, submissions); err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	c.Response().Header().Set("x-accel-redirect", "/assignments/"+classID+".zip")
+	return c.NoContent(http.StatusOK)
 }
 
 func createSubmissionsZip2(zipFilePath string, classID string, submissions []Submission) error {
