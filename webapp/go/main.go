@@ -13,14 +13,17 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/goccy/go-json"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -35,8 +38,26 @@ type handlers struct {
 	DB *sqlx.DB
 }
 
+type JSONSerializer struct{}
+
+func (j *JSONSerializer) Serialize(c echo.Context, i interface{}, indent string) error {
+	enc := json.NewEncoder(c.Response())
+	return enc.Encode(i)
+}
+
+func (j *JSONSerializer) Deserialize(c echo.Context, i interface{}) error {
+	err := json.NewDecoder(c.Request().Body).Decode(i)
+	if ute, ok := err.(*json.UnmarshalTypeError); ok {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Unmarshal type error: expected=%v, got=%v, field=%v, offset=%v", ute.Type, ute.Value, ute.Field, ute.Offset)).SetInternal(err)
+	} else if se, ok := err.(*json.SyntaxError); ok {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Syntax error: offset=%v, error=%v", se.Offset, se.Error())).SetInternal(err)
+	}
+	return err
+}
+
 func main() {
 	e := echo.New()
+	e.JSONSerializer = &JSONSerializer{}
 	e.Debug = GetEnv("DEBUG", "") == "true"
 	e.Server.Addr = fmt.Sprintf(":%v", GetEnv("PORT", "7000"))
 	e.HideBanner = true
@@ -169,24 +190,28 @@ func (h *handlers) IsAdmin(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-func getUserInfo(c echo.Context) (userID string, userName string, isAdmin bool, err error) {
+func getUserInfo(c echo.Context) (userID string, userName string, isAdmin bool, userCode string, err error) {
 	sess, err := session.Get(SessionName, c)
 	if err != nil {
-		return "", "", false, err
+		return "", "", false, "", err
 	}
 	_userID, ok := sess.Values["userID"]
 	if !ok {
-		return "", "", false, errors.New("failed to get userID from session")
+		return "", "", false, "", errors.New("failed to get userID from session")
 	}
 	_userName, ok := sess.Values["userName"]
 	if !ok {
-		return "", "", false, errors.New("failed to get userName from session")
+		return "", "", false, "", errors.New("failed to get userName from session")
 	}
 	_isAdmin, ok := sess.Values["isAdmin"]
 	if !ok {
-		return "", "", false, errors.New("failed to get isAdmin from session")
+		return "", "", false, "", errors.New("failed to get isAdmin from session")
 	}
-	return _userID.(string), _userName.(string), _isAdmin.(bool), nil
+	_userCode, ok := sess.Values["userCode"]
+	if !ok {
+		return "", "", false, "", errors.New("failed to get userCode from session")
+	}
+	return _userID.(string), _userName.(string), _isAdmin.(bool), _userCode.(string), nil
 }
 
 type UserType string
@@ -202,6 +227,11 @@ type User struct {
 	Name           string   `db:"name"`
 	HashedPassword []byte   `db:"hashed_password"`
 	Type           UserType `db:"type"`
+}
+
+type UserIDAndCode struct {
+	ID   string `db:"id"`
+	Code string `db:"code"`
 }
 
 type CourseType string
@@ -284,6 +314,7 @@ func (h *handlers) Login(c echo.Context) error {
 	sess.Values["userID"] = user.ID
 	sess.Values["userName"] = user.Name
 	sess.Values["isAdmin"] = user.Type == Teacher
+	sess.Values["userCode"] = user.Code
 	sess.Options = &sessions.Options{
 		Path:   "/",
 		MaxAge: 3600,
@@ -328,14 +359,8 @@ type GetMeResponse struct {
 
 // GetMe GET /api/users/me 自身の情報を取得
 func (h *handlers) GetMe(c echo.Context) error {
-	userID, userName, isAdmin, err := getUserInfo(c)
+	_, userName, isAdmin, userCode, err := getUserInfo(c)
 	if err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-
-	var userCode string
-	if err := h.DB.Get(&userCode, "SELECT `code` FROM `users` WHERE `id` = ?", userID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -357,7 +382,7 @@ type GetRegisteredCourseResponseContent struct {
 
 // GetRegisteredCourses GET /api/users/me/courses 履修中の科目一覧取得
 func (h *handlers) GetRegisteredCourses(c echo.Context) error {
-	userID, _, _, err := getUserInfo(c)
+	userID, _, _, _, err := getUserInfo(c)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -418,7 +443,7 @@ type RegisterCoursesErrorResponse struct {
 
 // RegisterCourses PUT /api/users/me/courses 履修登録
 func (h *handlers) RegisterCourses(c echo.Context) error {
-	userID, _, _, err := getUserInfo(c)
+	userID, _, _, _, err := getUserInfo(c)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -558,12 +583,54 @@ type ClassScore struct {
 	Submitters int    `json:"submitters"` // 提出した学生数
 }
 
+var gpaCachedAt time.Time
+var cachededGPAs []float64
+var gpaCalcGroup singleflight.Group
+
 // GetGrades GET /api/users/me/grades 成績取得
 func (h *handlers) GetGrades(c echo.Context) error {
-	userID, _, _, err := getUserInfo(c)
+	userID, _, _, _, err := getUserInfo(c)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	// GPAの統計値
+	// 一つでも修了した科目がある学生のGPA一覧
+	now := time.Now()
+	var gpas []float64
+	if now.Sub(gpaCachedAt) > 900*time.Millisecond || cachededGPAs == nil {
+		gpasIf, err, _ := gpaCalcGroup.Do("gpaCalc", func() (interface{}, error) {
+			var newGPAs []float64
+			q := "SELECT IFNULL(SUM(`submissions`.`score` * `courses`.`credit`), 0) / 100 / `credits`.`credits` AS `gpa`" +
+				" FROM `users`" +
+				" JOIN (" +
+				"     SELECT `users`.`id` AS `user_id`, SUM(`courses`.`credit`) AS `credits`" +
+				"     FROM `users`" +
+				"     JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
+				"     JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
+				"     GROUP BY `users`.`id`" +
+				" ) AS `credits` ON `credits`.`user_id` = `users`.`id`" +
+				" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
+				" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
+				" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
+				" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
+				" WHERE `users`.`type` = ?" +
+				" GROUP BY `users`.`id`"
+			if err := h.DB.Select(&newGPAs, q, StatusClosed, StatusClosed, Student); err != nil {
+				return nil, err
+			}
+			return newGPAs, nil
+		})
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		gpas = gpasIf.([]float64)
+		cachededGPAs = gpas
+		gpaCachedAt = now // time.Now() にするとリスク高そうなので保守的に
+	} else {
+		gpas = cachededGPAs
 	}
 
 	// 履修している科目一覧取得
@@ -662,29 +729,6 @@ func (h *handlers) GetGrades(c echo.Context) error {
 	}
 	if myCredits > 0 {
 		myGPA = myGPA / 100 / float64(myCredits)
-	}
-
-	// GPAの統計値
-	// 一つでも修了した科目がある学生のGPA一覧
-	var gpas []float64
-	query = "SELECT IFNULL(SUM(`submissions`.`score` * `courses`.`credit`), 0) / 100 / `credits`.`credits` AS `gpa`" +
-		" FROM `users`" +
-		" JOIN (" +
-		"     SELECT `users`.`id` AS `user_id`, SUM(`courses`.`credit`) AS `credits`" +
-		"     FROM `users`" +
-		"     JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-		"     JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
-		"     GROUP BY `users`.`id`" +
-		" ) AS `credits` ON `credits`.`user_id` = `users`.`id`" +
-		" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-		" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
-		" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
-		" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
-		" WHERE `users`.`type` = ?" +
-		" GROUP BY `users`.`id`"
-	if err := h.DB.Select(&gpas, query, StatusClosed, StatusClosed, Student); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	res := GetGradeResponse{
@@ -831,7 +875,7 @@ type AddCourseResponse struct {
 
 // AddCourse POST /api/courses 新規科目登録
 func (h *handlers) AddCourse(c echo.Context) error {
-	userID, _, _, err := getUserInfo(c)
+	userID, _, _, _, err := getUserInfo(c)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -867,7 +911,7 @@ func (h *handlers) AddCourse(c echo.Context) error {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-
+	c.Response().Header().Set("Cache-Control", "max-age=60")
 	return c.JSON(http.StatusCreated, AddCourseResponse{ID: courseID})
 }
 
@@ -968,7 +1012,7 @@ type GetClassResponse struct {
 
 // GetClasses GET /api/courses/:courseID/classes 科目に紐づく講義一覧の取得
 func (h *handlers) GetClasses(c echo.Context) error {
-	userID, _, _, err := getUserInfo(c)
+	userID, _, _, _, err := getUserInfo(c)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1090,7 +1134,7 @@ func (h *handlers) AddClass(c echo.Context) error {
 
 // SubmitAssignment POST /api/courses/:courseID/classes/:classID/assignments 課題の提出
 func (h *handlers) SubmitAssignment(c echo.Context) error {
-	userID, _, _, err := getUserInfo(c)
+	userID, _, _, _, err := getUserInfo(c)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1201,8 +1245,39 @@ func (h *handlers) RegisterScores(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "Invalid format.")
 	}
 
+	if len(req) == 0 {
+		if err := tx.Commit(); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		return c.NoContent(http.StatusNoContent)
+	}
+
+	userCodeMap := make(map[string]string, len(req))
+	userCodes := make([]string, 0, len(req))
 	for _, score := range req {
-		if _, err := tx.Exec("UPDATE `submissions` JOIN `users` ON `users`.`id` = `submissions`.`user_id` SET `score` = ? WHERE `users`.`code` = ? AND `class_id` = ?", score.Score, score.UserCode, classID); err != nil {
+		if _, ok := userCodeMap[score.UserCode]; !ok {
+			userCodeMap[score.UserCode] = ""
+			userCodes = append(userCodes, score.UserCode)
+		}
+	}
+	var userIDAndCode []UserIDAndCode
+	ucq, args, err := sqlx.In("SELECT `id`, `code` FROM `users` WHERE code IN (?)", userCodes)
+	if err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	if err := tx.Select(&userIDAndCode, ucq, args...); err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	for _, uc := range userIDAndCode {
+		userCodeMap[uc.Code] = uc.ID
+	}
+
+	for _, score := range req {
+		userID := userCodeMap[score.UserCode]
+		if _, err := tx.Exec("UPDATE `submissions` SET `score` = ? WHERE `user_id` = ? AND `class_id` = ?", score.Score, userID, classID); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
@@ -1338,7 +1413,7 @@ type GetAnnouncementsResponse struct {
 
 // GetAnnouncementList GET /api/announcements お知らせ一覧取得
 func (h *handlers) GetAnnouncementList(c echo.Context) error {
-	userID, _, _, err := getUserInfo(c)
+	userID, _, _, _, err := getUserInfo(c)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1518,7 +1593,7 @@ type AnnouncementDetail struct {
 
 // GetAnnouncementDetail GET /api/announcements/:announcementID お知らせ詳細取得
 func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
-	userID, _, _, err := getUserInfo(c)
+	userID, _, _, _, err := getUserInfo(c)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
