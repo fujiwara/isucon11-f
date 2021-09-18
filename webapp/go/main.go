@@ -867,7 +867,7 @@ func (h *handlers) AddCourse(c echo.Context) error {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-
+	c.Response().Header().Set("Cache-Control", "max-age=60")
 	return c.JSON(http.StatusCreated, AddCourseResponse{ID: courseID})
 }
 
