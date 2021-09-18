@@ -1595,12 +1595,15 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 
 	announcementID := c.Param("announcementID")
 
-	tx, err := h.DB.Beginx()
-	if err != nil {
+	var unread bool
+	var result sql.Result
+	if result, err = h.DB.Exec("UPDATE `unread_announcements` SET `is_deleted` = true WHERE `announcement_id` = ? AND `user_id` = ?", announcementID, userID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	defer tx.Rollback()
+	if cnt, _ := result.RowsAffected(); cnt == 1 {
+		unread = true
+	}
 
 	var announcement AnnouncementDetail
 	if _ann, ok := annoucementsMap[announcementID]; ok {
@@ -1609,7 +1612,7 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 		query := "SELECT `announcements`.`id`, `announcements`.`course_id` AS `course_id`, `announcements`.`course_name`, `announcements`.`title`, `announcements`.`message`, true AS `unread`" +
 			" FROM `announcements`" +
 			" WHERE `announcements`.`id` = ?"
-		if err := tx.Get(&announcement, query, announcementID); err != nil && err != sql.ErrNoRows {
+		if err := h.DB.Get(&announcement, query, announcementID); err != nil && err != sql.ErrNoRows {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		} else if err == sql.ErrNoRows {
@@ -1617,28 +1620,15 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 		}
 		annoucementsMap[announcementID] = announcement
 	}
-
-	var result sql.Result
-	if result, err = tx.Exec("UPDATE `unread_announcements` SET `is_deleted` = true WHERE `announcement_id` = ? AND `user_id` = ? AND NOT `is_deleted`", announcementID, userID); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	if cnt, _ := result.RowsAffected(); cnt == 1 {
-		announcement.Unread = true
-	}
+	announcement.Unread = unread
 
 	var registrationCount int
-	if err := tx.Get(&registrationCount, "SELECT COUNT(*) FROM `registrations` WHERE `course_id` = ? AND `user_id` = ?", announcement.CourseID, userID); err != nil {
+	if err := h.DB.Get(&registrationCount, "SELECT COUNT(*) FROM `registrations` WHERE `course_id` = ? AND `user_id` = ?", announcement.CourseID, userID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	if registrationCount == 0 {
 		return c.String(http.StatusNotFound, "No such announcement.")
-	}
-
-	if err := tx.Commit(); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	return c.JSON(http.StatusOK, announcement)
