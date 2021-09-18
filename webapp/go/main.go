@@ -1428,21 +1428,29 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 
 	var announcements []AnnouncementWithoutDetail
 	var args []interface{}
-	query := "SELECT `announcements`.`id`, `announcements`.`course_id` AS `course_id`, `announcements`.`course_name`, `announcements`.`title`, NOT `unread_announcements`.`is_deleted` AS `unread`" +
+	query := "SELECT `announcements`.`id`, `announcements`.`course_id` AS `course_id`, `announcements`.`course_name`, `announcements`.`title`, false AS `unread`" +
 		" FROM `announcements`" +
-		" JOIN `registrations` ON `announcements`.`course_id` = `registrations`.`course_id`" +
-		" JOIN `unread_announcements` ON `announcements`.`id` = `unread_announcements`.`announcement_id`" +
 		" WHERE 1=1"
 
 	if courseID := c.QueryParam("course_id"); courseID != "" {
 		query += " AND `announcements`.`course_id` = ?"
 		args = append(args, courseID)
+	} else {
+		var regIDs []string
+		if err := tx.Select(&regIDs, "SELECT id FROM `registrations` WHERE `user_id` = ?", userID); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		wq, wqargs, err := sqlx.In(" AND `announcements`.`course_id` IN (?)", regIDs)
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		query += wq
+		args = append(args, wqargs...)
 	}
 
-	query += " AND `unread_announcements`.`user_id` = ?" +
-		" AND `registrations`.`user_id` = ?" +
-		" ORDER BY `announcements`.`id` DESC" +
-		" LIMIT ? OFFSET ?"
+	query += " ORDER BY `announcements`.`id` DESC LIMIT ? OFFSET ?"
 	args = append(args, userID, userID)
 
 	var page int
@@ -1468,6 +1476,36 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	if err := tx.Get(&unreadCount, "SELECT COUNT(*) FROM `unread_announcements` WHERE `user_id` = ? AND NOT `is_deleted`", userID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	if unreadCount > 0 {
+		announcementIDs := make([]string, 0, len(announcements))
+		for _, announcement := range announcements {
+			announcementIDs = append(announcementIDs, announcement.ID)
+		}
+		query, args, err = sqlx.In("SELECT id FROM `unread_announcements` WHERE `user_id` = ? AND `is_deleted` = true AND announcement_id IN (?)", userID, announcementIDs)
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		var unreadAnnouncementIDs []string
+		if err := tx.Select(&unreadAnnouncementIDs, query, args...); err != nil {
+			if err != sql.ErrNoRows {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+		}
+		unreadMap := make(map[string]struct{}, len(unreadAnnouncementIDs))
+		if len(unreadAnnouncementIDs) > 0 {
+			for _, unreadAnnouncementID := range unreadAnnouncementIDs {
+				unreadMap[unreadAnnouncementID] = struct{}{}
+			}
+		}
+		for _, announcement := range announcements {
+			if _, ok := unreadMap[announcement.ID]; ok {
+				announcement.Unread = true
+			}
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
