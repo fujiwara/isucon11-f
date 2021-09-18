@@ -4,7 +4,7 @@ set -xe
 cd go && make && cd -
 now=$(date +%Y%m%d-%H%M%S)
 
-for h in 1 2 3
+for h in 1
 do
    rsync -av ~/env.sh isucon${h}:/home/isucon/
    rsync -av ./go/ isucon${h}:/home/isucon/webapp/go/
@@ -13,7 +13,7 @@ do
 done
 
 rsync -av /etc/nginx/ isucon${h}:/tmp/etc/nginx/
-for h in 1 2 3
+for h in 1 2 #3
 do
    ssh isucon${h} sudo mkdir -p /tmp/etc/nginx 
    ssh isucon${h} sudo rsync -av /tmp/etc/nginx/ /etc/nginx/
@@ -22,7 +22,7 @@ do
    ssh isucon${h} sudo systemctl restart nginx
 done
 
-for h in 1 2
+for h in 2
 do
    ssh isucon${h} sudo touch /var/log/mysql/mysql-slow.log
    ssh isucon${h} sudo mv /var/log/mysql/mysql-slow.log /var/log/mysql/mysql-slow.log.$now
