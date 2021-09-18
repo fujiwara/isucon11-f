@@ -675,51 +675,53 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		}
 
 		var myTotalScore int
-		q, args, err := sqlx.In("SELECT class_id, COUNT(*) FROM `submissions` WHERE `class_id` IN (?) GROUP BY `class_id`", classIDs)
-		if err != nil {
-			c.Logger().Error(err) // oops
-			return c.NoContent(http.StatusInternalServerError)
-		}
-		rows, err := h.DB.Query(q, args...)
-		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-
 		submissionsCounts := map[string]int64{}
-		for rows.Next() {
-			var classID string
-			var count int64
-			err := rows.Scan(&classID, &count)
-			if err != nil {
-				c.Logger().Error(err)
-			}
-			submissionsCounts[classID] = count
-		}
-		rows.Close()
-
-		q, args, err = sqlx.In("SELECT `class_id`, `submissions`.`score` FROM `submissions` WHERE `user_id` = ? AND `class_id` IN (?)", userID, classIDs)
-		if err != nil {
-			c.Logger().Error(err) // oops
-			return c.NoContent(http.StatusInternalServerError)
-		}
-		rows, err = h.DB.Query(q, args...)
-		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-
 		myScores := map[string]sql.NullInt64{}
-		for rows.Next() {
-			var classID string
-			var score sql.NullInt64
-			err := rows.Scan(&classID, &score)
+		if len(classIDs) > 0 {
+			q, args, err := sqlx.In("SELECT class_id, COUNT(*) FROM `submissions` WHERE `class_id` IN (?) GROUP BY `class_id`", classIDs)
+			if err != nil {
+				c.Logger().Error(err) // oops
+				return c.NoContent(http.StatusInternalServerError)
+			}
+			rows, err := h.DB.Query(q, args...)
 			if err != nil {
 				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
 			}
-			myScores[classID] = score
+
+			for rows.Next() {
+				var classID string
+				var count int64
+				err := rows.Scan(&classID, &count)
+				if err != nil {
+					c.Logger().Error(err)
+				}
+				submissionsCounts[classID] = count
+			}
+			rows.Close()
+
+			q, args, err = sqlx.In("SELECT `class_id`, `submissions`.`score` FROM `submissions` WHERE `user_id` = ? AND `class_id` IN (?)", userID, classIDs)
+			if err != nil {
+				c.Logger().Error(err) // oops
+				return c.NoContent(http.StatusInternalServerError)
+			}
+			rows, err = h.DB.Query(q, args...)
+			if err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+
+			for rows.Next() {
+				var classID string
+				var score sql.NullInt64
+				err := rows.Scan(&classID, &score)
+				if err != nil {
+					c.Logger().Error(err)
+				}
+				myScores[classID] = score
+			}
+			rows.Close()
 		}
-		rows.Close()
 
 		for _, class := range classes {
 			classID := class.ID
