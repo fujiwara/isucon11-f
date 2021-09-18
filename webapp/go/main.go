@@ -1614,7 +1614,7 @@ type AnnouncementDetail struct {
 	Unread     bool   `json:"unread" db:"unread"`
 }
 
-var annoucementsMap = map[string]AnnouncementDetail{}
+var annoucementsMap = sync.Map{} // map[string]AnnouncementDetail{}
 
 // GetAnnouncementDetail GET /api/announcements/:announcementID お知らせ詳細取得
 func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
@@ -1637,8 +1637,8 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	}
 
 	var announcement AnnouncementDetail
-	if _ann, ok := annoucementsMap[announcementID]; ok {
-		announcement = _ann
+	if _ann, ok := annoucementsMap.Load(announcementID); ok {
+		announcement = _ann.(AnnouncementDetail)
 	} else {
 		query := "SELECT `announcements`.`id`, `announcements`.`course_id` AS `course_id`, `announcements`.`course_name`, `announcements`.`title`, `announcements`.`message`, true AS `unread`" +
 			" FROM `announcements`" +
@@ -1649,7 +1649,7 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 		} else if err == sql.ErrNoRows {
 			return c.String(http.StatusNotFound, "No such announcement.")
 		}
-		annoucementsMap[announcementID] = announcement
+		annoucementsMap.Store(announcementID, announcement)
 	}
 	announcement.Unread = unread
 
