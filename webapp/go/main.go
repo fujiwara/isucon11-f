@@ -699,7 +699,7 @@ func (h *handlers) GetGrades(c echo.Context) error {
 
 		// この科目を履修している学生のTotalScore一覧を取得
 		var totals []int
-		if now.Sub(totalScoreCachedAt[course.ID]) > 900*time.Millisecond || cachedTotalScore[course.ID] == nil {
+		if now.Sub(totalScoreCachedAt[course.ID]) > 100*time.Millisecond || cachedTotalScore[course.ID] == nil {
 			var flight *singleflight.Group
 			var exists bool
 			if flight, exists = totalScoreCalcGroup[course.ID]; !exists {
