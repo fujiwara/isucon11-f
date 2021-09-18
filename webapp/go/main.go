@@ -603,6 +603,7 @@ func (h *handlers) GetGrades(c echo.Context) error {
 			return c.NoContent(http.StatusInternalServerError)
 		}
 		cachededGPAs = newGPAs
+		gpas = newGPAs
 		gpaCachedAt = now // time.Now() にするとリスク高そうなので保守的に
 	} else {
 		gpas = cachededGPAs
