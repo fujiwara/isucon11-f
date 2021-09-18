@@ -640,7 +640,7 @@ func (h *handlers) GetGrades(c echo.Context) error {
 	query := "SELECT `courses`.*" +
 		" FROM `registrations`" +
 		" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id`" +
-		" WHERE `user_id` = ? ORDER BY `cources_id`"
+		" WHERE `user_id` = ? ORDER BY `course_id`"
 	if err := h.DB.Select(&registeredCourses, query, userID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
