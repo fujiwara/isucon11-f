@@ -1563,6 +1563,8 @@ type AnnouncementDetail struct {
 	Unread     bool   `json:"unread" db:"unread"`
 }
 
+var annoucementsMap = map[string]AnnouncementDetail{}
+
 // GetAnnouncementDetail GET /api/announcements/:announcementID お知らせ詳細取得
 func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	userID, _, _, err := getUserInfo(c)
@@ -1581,27 +1583,35 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	defer tx.Rollback()
 
 	var announcement AnnouncementDetail
-	query := "SELECT `announcements`.`id`, `announcements`.`cource_id` AS `course_id`, '' AS `course_name`, `announcements`.`title`, `announcements`.`message`, true AS `unread`" +
-		" FROM `announcements`" +
-		" WHERE `announcements`.`id` = ?"
-	if err := tx.Get(&announcement, query, announcementID, userID); err != nil && err != sql.ErrNoRows {
+	if _ann, ok := annoucementsMap[announcementID]; ok {
+		announcement = _ann
+	} else {
+		query := "SELECT `announcements`.`id`, `announcements`.`cource_id` AS `course_id`, '' AS `course_name`, `announcements`.`title`, `announcements`.`message`, true AS `unread`" +
+			" FROM `announcements`" +
+			" WHERE `announcements`.`id` = ?"
+		if err := tx.Get(&announcement, query, announcementID, userID); err != nil && err != sql.ErrNoRows {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		} else if err == sql.ErrNoRows {
+			return c.String(http.StatusNotFound, "No such announcement.")
+		}
+		var courceName string
+		if err := tx.Get(&courceName, "SELECT name FROM `cources` WHERE id = ?", announcementID); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		announcement.CourseName = courceName
+		announcement = _ann
+	}
+
+	var result sql.Result
+	if result, err = tx.Exec("UPDATE `unread_announcements` SET `is_deleted` = true WHERE `announcement_id` = ? AND `user_id` = ? AND `is_deleted = false", announcementID, userID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
-	} else if err == sql.ErrNoRows {
-		return c.String(http.StatusNotFound, "No such announcement.")
 	}
-	var courceName string
-	if err := tx.Get(&courceName, "SELECT name FROM `cources` WHERE id = ?", announcementID); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
+	if cnt, _ := result.RowsAffected(); cnt == 1 {
+		announcement.Unread = true
 	}
-	announcement.CourseName = courceName
-	var isDeleted bool
-	if err := tx.Get(&isDeleted, "SELECT is_deleted FROM `unread_announcements` WHERE announcement_id = ? AND user_id = ?", announcementID, userID); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	announcement.Unread = !isDeleted
 
 	var registrationCount int
 	if err := tx.Get(&registrationCount, "SELECT COUNT(*) FROM `registrations` WHERE `course_id` = ? AND `user_id` = ?", announcement.CourseID, userID); err != nil {
@@ -1610,11 +1620,6 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	}
 	if registrationCount == 0 {
 		return c.String(http.StatusNotFound, "No such announcement.")
-	}
-
-	if _, err := tx.Exec("UPDATE `unread_announcements` SET `is_deleted` = true WHERE `announcement_id` = ? AND `user_id` = ?", announcementID, userID); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	if err := tx.Commit(); err != nil {
