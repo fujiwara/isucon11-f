@@ -593,8 +593,13 @@ type ClassScore struct {
 }
 
 var gpaCachedAt time.Time
-var cachededGPAs []float64
+var cachedGPAs []float64
 var gpaCalcGroup singleflight.Group
+
+// map by course ID
+var totalScoreCachedAt map[string]time.Time
+var cachedTotalScore map[string][]int
+var totalScoreCalcGroup map[string]singleflight.Group 
 
 // GetGrades GET /api/users/me/grades 成績取得
 func (h *handlers) GetGrades(c echo.Context) error {
@@ -608,7 +613,7 @@ func (h *handlers) GetGrades(c echo.Context) error {
 	// 一つでも修了した科目がある学生のGPA一覧
 	now := time.Now()
 	var gpas []float64
-	if now.Sub(gpaCachedAt) > 900*time.Millisecond || cachededGPAs == nil {
+	if now.Sub(gpaCachedAt) > 900*time.Millisecond || cachedGPAs == nil {
 		gpasIf, err, _ := gpaCalcGroup.Do("gpaCalc", func() (interface{}, error) {
 			var newGPAs []float64
 			q := "SELECT IFNULL(SUM(`submissions`.`score` * `courses`.`credit`), 0) / 100 / `credits`.`credits` AS `gpa`" +
@@ -636,10 +641,10 @@ func (h *handlers) GetGrades(c echo.Context) error {
 			return c.NoContent(http.StatusInternalServerError)
 		}
 		gpas = gpasIf.([]float64)
-		cachededGPAs = gpas
+		cachedGPAs = gpas
 		gpaCachedAt = now // time.Now() にするとリスク高そうなので保守的に
 	} else {
-		gpas = cachededGPAs
+		gpas = cachedGPAs
 	}
 
 	// 履修している科目一覧取得
@@ -706,18 +711,36 @@ func (h *handlers) GetGrades(c echo.Context) error {
 
 		// この科目を履修している学生のTotalScore一覧を取得
 		var totals []int
-		query := "SELECT IFNULL(SUM(`submissions`.`score`), 0) AS `total_score`" +
-			" FROM `users`" +
-			" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-			" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id`" +
-			" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
-			" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
-			" WHERE `courses`.`id` = ?" +
-			" GROUP BY `users`.`id`"
-		if err := h.DB.Select(&totals, query, course.ID); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
+		if now.Sub(totalScoreCachedAt[course.ID]) > 900*time.Millisecond || cachedTotalScore[course.ID] == nil {
+			flight := totalScoreCalcGroup[course.ID]
+			totalsIf, err, _ := flight.Do(fmt.Sprintf("totalScore-%s", course.ID), func() (interface{}, error) {
+				var newTotals []int
+				q := "SELECT IFNULL(SUM(`submissions`.`score`), 0) AS `total_score`" +
+					" FROM `users`" +
+					" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
+					" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id`" +
+					" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
+					" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
+					" WHERE `courses`.`id` = ?" +
+					" GROUP BY `users`.`id`"
+				if err := h.DB.Select(&newTotals, q, course.ID); err != nil {
+					return nil, err
+				}
+
+				return newTotals, nil
+			})
+			if err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+
+			totals = totalsIf.([]int)
+			cachedTotalScore[course.ID] = totals
+			totalScoreCachedAt[course.ID] = now
+		} else {
+			totals = cachedTotalScore[course.ID]
 		}
+
 
 		courseResults = append(courseResults, CourseResult{
 			Name:             course.Name,
