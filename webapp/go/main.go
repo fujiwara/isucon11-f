@@ -391,13 +391,6 @@ func (h *handlers) GetRegisteredCourses(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	/*	tx, err := h.DB.Beginx()
-		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-		defer tx.Rollback()
-	*/
 	var courses []Course
 	query := "SELECT `courses`.*" +
 		" FROM `courses`" +
@@ -407,12 +400,6 @@ func (h *handlers) GetRegisteredCourses(c echo.Context) error {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	/*
-		if err := tx.Commit(); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-	*/
 	// 履修科目が0件の時は空配列を返却
 	res := make([]GetRegisteredCourseResponseContent, 0, len(courses))
 	for _, course := range courses {
@@ -1030,13 +1017,6 @@ func (h *handlers) GetClasses(c echo.Context) error {
 
 	courseID := c.Param("courseID")
 
-	/*	tx, err := h.DB.Beginx()
-		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-		defer tx.Rollback()
-	*/
 	tx := h.DB
 	var count int
 	if err := tx.Get(&count, "SELECT COUNT(*) FROM `courses` WHERE `id` = ?", courseID); err != nil {
@@ -1057,12 +1037,6 @@ func (h *handlers) GetClasses(c echo.Context) error {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-
-	/*if err := tx.Commit(); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	*/
 
 	// 結果が0件の時は空配列を返却
 	res := make([]GetClassResponse, 0, len(classes))
@@ -1407,14 +1381,6 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	/*
-		tx, err := h.DB.Beginx()
-		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-		defer tx.Rollback()
-	*/
 	var announcements []AnnouncementWithoutDetail
 	var args []interface{}
 	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, NOT `unread_announcements`.`is_deleted` AS `unread`" +
