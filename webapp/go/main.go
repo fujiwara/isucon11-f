@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -37,6 +38,8 @@ const (
 type handlers struct {
 	DB *sqlx.DB
 }
+
+var teacherNameCache = sync.Map{}
 
 type JSONSerializer struct{}
 
@@ -388,44 +391,38 @@ func (h *handlers) GetRegisteredCourses(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	tx, err := h.DB.Beginx()
-	if err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	defer tx.Rollback()
-
 	var courses []Course
 	query := "SELECT `courses`.*" +
 		" FROM `courses`" +
 		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id`" +
 		" WHERE `courses`.`status` != ? AND `registrations`.`user_id` = ?"
-	if err := tx.Select(&courses, query, StatusClosed, userID); err != nil {
+	if err := h.DB.Select(&courses, query, StatusClosed, userID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-
 	// 履修科目が0件の時は空配列を返却
 	res := make([]GetRegisteredCourseResponseContent, 0, len(courses))
 	for _, course := range courses {
 		var teacher User
-		if err := tx.Get(&teacher, "SELECT * FROM `users` WHERE `id` = ?", course.TeacherID); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
+		var teacherName string
+		if name, found := teacherNameCache.Load(course.TeacherID); found {
+			teacherName = name.(string)
+		} else {
+			if err := h.DB.Get(&teacher, "SELECT name FROM `users` WHERE `id` = ?", course.TeacherID); err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+			teacherName = teacher.Name
+			teacherNameCache.Store(course.TeacherID, teacherName)
 		}
 
 		res = append(res, GetRegisteredCourseResponseContent{
 			ID:        course.ID,
 			Name:      course.Name,
-			Teacher:   teacher.Name,
+			Teacher:   teacherName,
 			Period:    course.Period,
 			DayOfWeek: course.DayOfWeek,
 		})
-	}
-
-	if err := tx.Commit(); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	return c.JSON(http.StatusOK, res)
@@ -1020,13 +1017,7 @@ func (h *handlers) GetClasses(c echo.Context) error {
 
 	courseID := c.Param("courseID")
 
-	tx, err := h.DB.Beginx()
-	if err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	defer tx.Rollback()
-
+	tx := h.DB
 	var count int
 	if err := tx.Get(&count, "SELECT COUNT(*) FROM `courses` WHERE `id` = ?", courseID); err != nil {
 		c.Logger().Error(err)
@@ -1043,11 +1034,6 @@ func (h *handlers) GetClasses(c echo.Context) error {
 		" WHERE `classes`.`course_id` = ?" +
 		" ORDER BY `classes`.`part`"
 	if err := tx.Select(&classes, query, userID, courseID); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-
-	if err := tx.Commit(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -1372,30 +1358,6 @@ func createSubmissionsZip2(zipFilePath string, classID string, submissions []Sub
 	return nil
 }
 
-func createSubmissionsZip(zipFilePath string, classID string, submissions []Submission) error {
-	tmpDir := AssignmentsDirectory + classID + "/"
-	if err := exec.Command("rm", "-rf", tmpDir).Run(); err != nil {
-		return err
-	}
-	if err := exec.Command("mkdir", tmpDir).Run(); err != nil {
-		return err
-	}
-
-	// ファイル名を指定の形式に変更
-	for _, submission := range submissions {
-		if err := exec.Command(
-			"cp",
-			AssignmentsDirectory+classID+"-"+submission.UserID+".pdf",
-			tmpDir+submission.UserCode+"-"+submission.FileName,
-		).Run(); err != nil {
-			return err
-		}
-	}
-
-	// -i 'tmpDir/*': 空zipを許す
-	return exec.Command("zip", "-j", "-r", zipFilePath, tmpDir, "-i", tmpDir+"*").Run()
-}
-
 // ---------- Announcement API ----------
 
 type AnnouncementWithoutDetail struct {
@@ -1419,13 +1381,6 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	tx, err := h.DB.Beginx()
-	if err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	defer tx.Rollback()
-
 	var announcements []AnnouncementWithoutDetail
 	var args []interface{}
 	query := "SELECT `announcements`.`id`, `announcements`.`course_id` AS `course_id`, `announcements`.`course_name`, `announcements`.`title`, false AS `unread`" +
@@ -1437,7 +1392,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		args = append(args, courseID)
 	} else {
 		var regIDs []string
-		if err := tx.Select(&regIDs, "SELECT id FROM `registrations` WHERE `user_id` = ?", userID); err != nil {
+		if err := h.DB.Select(&regIDs, "SELECT id FROM `registrations` WHERE `user_id` = ?", userID); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
@@ -1467,13 +1422,13 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	// limitより多く上限を設定し、実際にlimitより多くレコードが取得できた場合は次のページが存在する
 	args = append(args, limit+1, offset)
 
-	if err := tx.Select(&announcements, query, args...); err != nil {
+	if err := h.DB.Select(&announcements, query, args...); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	var unreadCount int
-	if err := tx.Get(&unreadCount, "SELECT COUNT(*) FROM `unread_announcements` WHERE `user_id` = ? AND NOT `is_deleted`", userID); err != nil {
+	if err := h.DB.Get(&unreadCount, "SELECT COUNT(*) FROM `unread_announcements` WHERE `user_id` = ? AND NOT `is_deleted`", userID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -1489,7 +1444,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 			return c.NoContent(http.StatusInternalServerError)
 		}
 		var unreadAnnouncementIDs []string
-		if err := tx.Select(&unreadAnnouncementIDs, query, args...); err != nil {
+		if err := h.DB.Select(&unreadAnnouncementIDs, query, args...); err != nil {
 			if err != sql.ErrNoRows {
 				c.Logger().Error(err)
 				return c.NoContent(http.StatusInternalServerError)
@@ -1506,11 +1461,6 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 				announcement.Unread = true
 			}
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	var links []string
