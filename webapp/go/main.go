@@ -40,6 +40,7 @@ type handlers struct {
 }
 
 var teacherNameCache = sync.Map{}
+var courseStatusCache = sync.Map{}
 
 type JSONSerializer struct{}
 
@@ -466,15 +467,21 @@ func (h *handlers) RegisterCourses(c echo.Context) error {
 	for _, courseReq := range req {
 		courseID := courseReq.ID
 		var course Course
-		if err := tx.Get(&course, "SELECT * FROM `courses` WHERE `id` = ? FOR SHARE", courseID); err != nil && err != sql.ErrNoRows {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		} else if err == sql.ErrNoRows {
-			errors.CourseNotFound = append(errors.CourseNotFound, courseReq.ID)
-			continue
+		var courseStatus CourseStatus
+		if s, found := courseStatusCache.Load(courseID); found {
+			courseStatus = s.(CourseStatus)
+		} else {
+			if err := tx.Get(&course, "SELECT status FROM `courses` WHERE `id` = ? FOR SHARE", courseID); err != nil && err != sql.ErrNoRows {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			} else if err == sql.ErrNoRows {
+				errors.CourseNotFound = append(errors.CourseNotFound, courseReq.ID)
+				continue
+			}
+			courseStatus = course.Status
+			courseStatusCache.Store(courseID, courseStatus)
 		}
-
-		if course.Status != StatusRegistration {
+		if courseStatus != StatusRegistration {
 			errors.NotRegistrableStatus = append(errors.NotRegistrableStatus, course.ID)
 			continue
 		}
@@ -585,8 +592,8 @@ var cachedGPAs []float64
 var gpaCalcGroup singleflight.Group
 
 // map by course ID
-var totalScoreCachedAt  = sync.Map{} // map[string]time.Time
-var cachedTotalScore = sync.Map{} // map[string][]int
+var totalScoreCachedAt = sync.Map{}  // map[string]time.Time
+var cachedTotalScore = sync.Map{}    // map[string][]int
 var totalScoreCalcGroup = sync.Map{} // map[string]*singleflight.Group
 
 // GetGrades GET /api/users/me/grades 成績取得
@@ -737,7 +744,6 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		} else {
 			totals = score.([]int)
 		}
-
 
 		courseResults = append(courseResults, CourseResult{
 			Name:             course.Name,
@@ -1011,6 +1017,7 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	courseStatusCache.Store(courseID, req.Status)
 
 	if err := tx.Commit(); err != nil {
 		c.Logger().Error(err)
