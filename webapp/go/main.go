@@ -38,6 +38,8 @@ type handlers struct {
 	DB *sqlx.DB
 }
 
+var teacherNameCache = make(map[string]string, 1000)
+
 type JSONSerializer struct{}
 
 func (j *JSONSerializer) Serialize(c echo.Context, i interface{}, indent string) error {
@@ -409,15 +411,22 @@ func (h *handlers) GetRegisteredCourses(c echo.Context) error {
 	res := make([]GetRegisteredCourseResponseContent, 0, len(courses))
 	for _, course := range courses {
 		var teacher User
-		if err := tx.Get(&teacher, "SELECT * FROM `users` WHERE `id` = ?", course.TeacherID); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
+		var teacherName string
+		if name, found := teacherNameCache[course.TeacherID]; found {
+			teacherName = name
+		} else {
+			if err := tx.Get(&teacher, "SELECT name FROM `users` WHERE `id` = ?", course.TeacherID); err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+			teacherName = teacher.Name
+			teacherNameCache[course.TeacherID] = teacherName
 		}
 
 		res = append(res, GetRegisteredCourseResponseContent{
 			ID:        course.ID,
 			Name:      course.Name,
-			Teacher:   teacher.Name,
+			Teacher:   teacherName,
 			Period:    course.Period,
 			DayOfWeek: course.DayOfWeek,
 		})
