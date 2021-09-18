@@ -582,28 +582,34 @@ func (h *handlers) GetGrades(c echo.Context) error {
 	now := time.Now()
 	var gpas []float64
 	if now.Sub(gpaCachedAt) > 900*time.Millisecond || cachededGPAs == nil {
-		var newGPAs []float64
-		q := "SELECT IFNULL(SUM(`submissions`.`score` * `courses`.`credit`), 0) / 100 / `credits`.`credits` AS `gpa`" +
-			" FROM `users`" +
-			" JOIN (" +
-			"     SELECT `users`.`id` AS `user_id`, SUM(`courses`.`credit`) AS `credits`" +
-			"     FROM `users`" +
-			"     JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-			"     JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
-			"     GROUP BY `users`.`id`" +
-			" ) AS `credits` ON `credits`.`user_id` = `users`.`id`" +
-			" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-			" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
-			" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
-			" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
-			" WHERE `users`.`type` = ?" +
-			" GROUP BY `users`.`id`"
-		if err := h.DB.Select(&newGPAs, q, StatusClosed, StatusClosed, Student); err != nil {
+		gpasIf, err, _ := gpaCalcGroup.Do("gpaCalc", func() (interface{}, error) {
+			var newGPAs []float64
+			q := "SELECT IFNULL(SUM(`submissions`.`score` * `courses`.`credit`), 0) / 100 / `credits`.`credits` AS `gpa`" +
+				" FROM `users`" +
+				" JOIN (" +
+				"     SELECT `users`.`id` AS `user_id`, SUM(`courses`.`credit`) AS `credits`" +
+				"     FROM `users`" +
+				"     JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
+				"     JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
+				"     GROUP BY `users`.`id`" +
+				" ) AS `credits` ON `credits`.`user_id` = `users`.`id`" +
+				" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
+				" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
+				" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
+				" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
+				" WHERE `users`.`type` = ?" +
+				" GROUP BY `users`.`id`"
+			if err := h.DB.Select(&newGPAs, q, StatusClosed, StatusClosed, Student); err != nil {
+				return nil, err
+			}
+			return newGPAs, nil
+		})
+		if err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
-		cachededGPAs = newGPAs
-		gpas = newGPAs
+		gpas = gpasIf.([]float64)
+		cachededGPAs = gpas
 		gpaCachedAt = now // time.Now() にするとリスク高そうなので保守的に
 	} else {
 		gpas = cachededGPAs
