@@ -1224,6 +1224,14 @@ func (h *handlers) RegisterScores(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "Invalid format.")
 	}
 
+	if len(req) == 0 {
+		if err := tx.Commit(); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		return c.NoContent(http.StatusNoContent)
+	}
+
 	userCodeMap := make(map[string]string, len(req))
 	userCodes := make([]string, 0, len(req))
 	for _, score := range req {
