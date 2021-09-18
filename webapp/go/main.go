@@ -204,6 +204,11 @@ type User struct {
 	Type           UserType `db:"type"`
 }
 
+type UserIDAndCode struct {
+	ID   string `db:"id"`
+	Code string `db:"code"`
+}
+
 type CourseType string
 
 const (
@@ -1201,8 +1206,31 @@ func (h *handlers) RegisterScores(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "Invalid format.")
 	}
 
+	userCodeMap := make(map[string]string, len(req))
+	userCodes := make([]string, 0, len(req))
 	for _, score := range req {
-		if _, err := tx.Exec("UPDATE `submissions` JOIN `users` ON `users`.`id` = `submissions`.`user_id` SET `score` = ? WHERE `users`.`code` = ? AND `class_id` = ?", score.Score, score.UserCode, classID); err != nil {
+		if _, ok := userCodeMap[score.UserCode]; !ok {
+			userCodeMap[score.UserCode] = ""
+			userCodes = append(userCodes, score.UserCode)
+		}
+	}
+	var userIDAndCode []UserIDAndCode
+	ucq, args, err := sqlx.In("SELECT `id`, `code` FROM `users` WHERE code IN (?)", userCodes)
+	if err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	if err := tx.Select(&userIDAndCode, ucq, args...); err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	for _, uc := range userIDAndCode {
+		userCodeMap[uc.Code] = uc.ID
+	}
+
+	for _, score := range req {
+		userID := userCodeMap[score.UserCode]
+		if _, err := tx.Exec("UPDATE `submissions` SET `score` = ? WHERE `user_id` = ? AND `class_id` = ?", score.Score, userID, classID); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
