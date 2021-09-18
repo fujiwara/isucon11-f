@@ -1457,7 +1457,7 @@ func (h *handlers) AddAnnouncement(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	query := "INSERT INTO `unread_announcements (`announcement_id`, `user_id`)" +
+	query := "INSERT INTO `unread_announcements` (`announcement_id`, `user_id`)" +
 		" SELECT ?, `registrations`.`user_id` FROM `registrations`" +
 		" WHERE `registrations`.`course_id` = ?"
 	if _, err := tx.Exec(query, req.ID, req.CourseID); err != nil {
